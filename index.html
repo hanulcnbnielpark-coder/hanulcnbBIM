@@ -423,7 +423,6 @@ function renderContent(visible) {
 async function openSettings() {
   settingsMode = true;
   activeIdx = -1;
-  // Load accounts from server
   try {
     const res = await api('getAccounts');
     settingsAccounts = res.accounts || [];
