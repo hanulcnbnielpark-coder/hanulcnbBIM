@@ -55,6 +55,10 @@ nav::-webkit-scrollbar{display:none}
 .tab.active{color:var(--text);font-weight:700;background:linear-gradient(165deg,rgba(16,185,129,.18) 0%,rgba(16,185,129,.06) 50%,rgba(16,185,129,.10) 100%);border-color:rgba(16,185,129,.4);box-shadow:0 4px 20px rgba(16,185,129,.2),0 0 1px rgba(16,185,129,.5),inset 0 1px 1px rgba(255,255,255,.15)}
 .tab.active::before{background:linear-gradient(175deg,rgba(16,185,129,.2) 0%,rgba(16,185,129,.08) 25%,transparent 50%,rgba(16,185,129,.03) 80%,rgba(16,185,129,.06) 100%)}
 .tab.active::after{background:radial-gradient(ellipse at 30% 20%,rgba(16,185,129,.1) 0%,transparent 60%)}
+/* Tab drag */
+.tab[draggable="true"]{cursor:grab}
+.tab[draggable="true"]:active{cursor:grabbing}
+.tab.drag-over{border-color:var(--accent) !important;box-shadow:0 0 12px rgba(16,185,129,.4),inset 0 1px 1px rgba(255,255,255,.15) !important}
 .tab-add{width:38px;height:38px;border-radius:12px;flex-shrink:0;display:grid;place-items:center;cursor:pointer;border:1px dashed rgba(255,255,255,.12);background:linear-gradient(165deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.02) 100%);color:var(--text-3);font-size:22px;transition:all .25s;font-family:var(--font);margin-left:6px}
 .tab-add:hover{border-color:rgba(16,185,129,.4);color:var(--accent);transform:translateY(-1px)}
 
@@ -370,15 +374,46 @@ function render() {
 
 function renderNavWithSettings(visible) {
   const isManager = currentUser.role === '팀장';
-  let html = visible.map((t, i) =>
-    '<button class="tab' + (!settingsMode && i===activeIdx ? ' active' : '') + '" onclick="selectTab(' + i + ')">' + esc(t.name) + '</button>'
-  ).join('');
+  let html = visible.map((t, i) => {
+    const drag = isManager ? ' draggable="true" ondragstart="tabDragStart(event,' + i + ')" ondragover="tabDragOver(event)" ondragenter="tabDragEnter(event)" ondragleave="tabDragLeave(event)" ondrop="tabDrop(event,' + i + ')" ondragend="tabDragEnd(event)"' : '';
+    return '<button class="tab' + (!settingsMode && i===activeIdx ? ' active' : '') + '"' + drag + ' onclick="selectTab(' + i + ')" data-idx="' + i + '">' + esc(t.name) + '</button>';
+  }).join('');
   if (isManager) {
     html += '<button class="tab' + (settingsMode ? ' active' : '') + '" onclick="openSettings()" style="gap:6px">' +
       '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.421 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.421-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.116l.094-.318z"/></svg>' +
       '설정</button>';
   }
   document.getElementById('nav').innerHTML = html;
+}
+
+// ══════════ TAB DRAG & DROP ══════════
+let dragFromIdx = -1;
+function tabDragStart(e, i) {
+  dragFromIdx = i;
+  e.target.style.opacity = '0.4';
+  e.dataTransfer.effectAllowed = 'move';
+}
+function tabDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+function tabDragEnter(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function tabDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function tabDragEnd(e) { e.target.style.opacity = '1'; document.querySelectorAll('.tab.drag-over').forEach(el => el.classList.remove('drag-over')); }
+async function tabDrop(e, toIdx) {
+  e.preventDefault();
+  if (dragFromIdx < 0 || dragFromIdx === toIdx) return;
+  const visible = getVisibleTabs();
+  // Map visible indices back to real tabs indices
+  const fromReal = tabs.indexOf(visible[dragFromIdx]);
+  const toReal = tabs.indexOf(visible[toIdx]);
+  if (fromReal < 0 || toReal < 0) return;
+  const [moved] = tabs.splice(fromReal, 1);
+  tabs.splice(toReal, 0, moved);
+  // Update activeIdx
+  if (activeIdx === dragFromIdx) activeIdx = toIdx;
+  else if (dragFromIdx < activeIdx && toIdx >= activeIdx) activeIdx--;
+  else if (dragFromIdx > activeIdx && toIdx <= activeIdx) activeIdx++;
+  dragFromIdx = -1;
+  render();
+  try { await api('saveTabs', { tabs }); } catch {}
 }
 
 function renderContent(visible) {
