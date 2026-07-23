@@ -234,10 +234,23 @@ footer .stat{display:flex;align-items:center;gap:6px}
     <div><label>탭 이름</label><input id="mName" placeholder="예: 프로젝트별 연락처"></div>
     <label>Google Sheets URL</label>
     <input id="mUrl" placeholder="https://docs.google.com/spreadsheets/d/...">
-    <div class="row"><div><label>열람 권한</label><select id="mRole"><option value="all">전체 공개</option><option value="팀장">팀장만</option></select></div></div>
+    <div class="row"><div><label>열람 권한</label><select id="mRole" onchange="onModalRoleChange(this.value)"><option value="all">전체 공개</option><option value="팀장">팀장만</option><option value="user">특정인만</option></select></div></div>
+    <div id="mUserSel" onclick="openUserPick({type:'modal'}, modalUserIds)" style="display:none;margin:-6px 0 16px;padding:8px 12px;border-radius:8px;background:var(--accent-dim);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer" title="클릭하여 인원 변경"></div>
     <div class="actions">
       <button class="btn-sm" onclick="closeModal()">취소</button>
       <button class="btn-sm accent" onclick="saveModal()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- USER PICK MODAL (특정인 선택) -->
+<div class="modal-bg" id="upBg" style="z-index:250" onclick="if(event.target===this)closeUserPick()">
+  <div class="modal" style="width:420px">
+    <h3>열람 가능 인원 선택</h3>
+    <div id="upList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:24px;max-height:320px;overflow-y:auto"></div>
+    <div class="actions">
+      <button class="btn-sm" onclick="closeUserPick()">취소</button>
+      <button class="btn-sm accent" onclick="confirmUserPick()">확인</button>
     </div>
   </div>
 </div>
@@ -344,7 +357,88 @@ async function showApp() {
 }
 
 // ══════════ HELPERS ══════════
-function getVisibleTabs() { return tabs.filter(t => t.role === 'all' || currentUser.role === '팀장'); }
+// 탭 role 형식: 'all' | '팀장' | 'user:아이디1,아이디2' (특정인 지정)
+function roleUserIds(role) {
+  const r = String(role || '');
+  return r.startsWith('user:') ? r.slice(5).split(',').map(s => s.trim()).filter(Boolean) : [];
+}
+function canViewTab(t) {
+  if (currentUser.role === '팀장') return true;
+  const r = t.role || 'all';
+  if (r === 'all') return true;
+  if (r === '팀장') return false;
+  if (r.startsWith('user:')) return roleUserIds(r).includes(String(currentUser.id));
+  return false;
+}
+function getVisibleTabs() { return tabs.filter(canViewTab); }
+
+// ══════════ USER PICKER (특정인 선택) ══════════
+let upTarget = null;        // {type:'tab', idx} | {type:'newtab'} | {type:'modal'}
+let modalUserIds = [];      // 탭 추가/수정 모달에서 선택된 인원
+let newTabUserIds = [];     // 설정 화면 새 탭 추가 행에서 선택된 인원
+
+async function getAccountList() {
+  if (settingsAccounts && settingsAccounts.length) return settingsAccounts;
+  try {
+    const res = await api('getAccounts');
+    settingsAccounts = res.accounts || [];
+  } catch (err) { toast('계정 목록 로드 실패: ' + err.message, 'err'); }
+  return settingsAccounts;
+}
+function accName(id) {
+  const a = (settingsAccounts || []).find(a => String(a.id) === String(id));
+  return a ? a.name : id;
+}
+function pickSummary(ids) {
+  const names = ids.map(accName);
+  return '👤 ' + (names.length <= 2 ? names.join(', ') : names[0] + ' 외 ' + (names.length - 1) + '명');
+}
+
+async function openUserPick(target, selectedIds) {
+  upTarget = target;
+  const accs = await getAccountList();
+  const sel = (selectedIds || []).map(String);
+  document.getElementById('upList').innerHTML = accs.length ? accs.map(a =>
+    '<label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;font-weight:500">' +
+    '<input type="checkbox" class="up-chk" value="' + escAttr(String(a.id)) + '"' + (sel.includes(String(a.id)) ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--accent)">' +
+    esc(a.name) + ' <span style="color:var(--text-3);font-size:12px">(' + esc(String(a.id)) + ')</span></label>').join('')
+    : '<div style="color:var(--text-3);font-size:14px">등록된 계정이 없습니다</div>';
+  document.getElementById('upBg').classList.add('show');
+}
+function closeUserPick() { document.getElementById('upBg').classList.remove('show'); }
+
+function confirmUserPick() {
+  const ids = [...document.querySelectorAll('.up-chk:checked')].map(c => c.value);
+  if (!ids.length) { toast('최소 1명을 선택하세요', 'err'); return; }
+  if (upTarget && upTarget.type === 'tab') {
+    tabs[upTarget.idx].role = 'user:' + ids.join(',');
+    const lbl = document.getElementById('tab_usel_' + upTarget.idx);
+    if (lbl) { lbl.textContent = pickSummary(ids); lbl.style.display = ''; }
+  } else if (upTarget && upTarget.type === 'newtab') {
+    newTabUserIds = ids;
+    const lbl = document.getElementById('newTabUsel');
+    if (lbl) { lbl.textContent = pickSummary(ids); lbl.style.display = ''; }
+  } else if (upTarget && upTarget.type === 'modal') {
+    modalUserIds = ids;
+    const lbl = document.getElementById('mUserSel');
+    if (lbl) { lbl.textContent = pickSummary(ids) + ' — 클릭하여 변경'; lbl.style.display = ''; }
+  }
+  closeUserPick();
+}
+
+function onModalRoleChange(v) {
+  const lbl = document.getElementById('mUserSel');
+  if (v === 'user') openUserPick({ type: 'modal' }, modalUserIds);
+  else if (lbl) lbl.style.display = 'none';
+}
+function onTabRoleSel(i, v) {
+  if (v === 'user') openUserPick({ type: 'tab', idx: i }, roleUserIds(tabs[i].role));
+  else { const lbl = document.getElementById('tab_usel_' + i); if (lbl) lbl.style.display = 'none'; }
+}
+function onNewTabRoleSel(v) {
+  if (v === 'user') openUserPick({ type: 'newtab' }, newTabUserIds);
+  else { const lbl = document.getElementById('newTabUsel'); if (lbl) lbl.style.display = 'none'; }
+}
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function escAttr(s) { return s.replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 function toast(msg, cls) {
@@ -502,22 +596,27 @@ function renderSettings() {
       '<button class="btn-sm danger" onclick="deleteAcc(' + i + ')" style="height:28px;padding:0 8px;font-size:12px">삭제</button>' +
     '</td></tr>').join('');
 
-  let tabUrlRows = tabs.map((t, i) => '<div class="s-tab-url">' +
+  let tabUrlRows = tabs.map((t, i) => {
+    const isUser = String(t.role||'').startsWith('user:');
+    return '<div class="s-tab-url">' +
     '<span class="s-tab-name">' + esc(t.name) + '</span>' +
     '<input value="' + esc(t.url||'') + '" placeholder="Google Sheets URL" id="tab_url_' + i + '">' +
-    '<select id="tab_role_' + i + '" style="width:100px;flex-shrink:0;height:36px;padding:0 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text);font-size:13px;font-family:var(--font)">' +
+    '<select id="tab_role_' + i + '" onchange="onTabRoleSel(' + i + ',this.value)" style="width:100px;flex-shrink:0;height:36px;padding:0 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text);font-size:13px;font-family:var(--font)">' +
       '<option value="all"' + (t.role==='all'?' selected':'') + '>전체공개</option>' +
       '<option value="팀장"' + (t.role==='팀장'?' selected':'') + '>팀장만</option>' +
+      '<option value="user"' + (isUser?' selected':'') + '>특정인</option>' +
     '</select>' +
+    '<span id="tab_usel_' + i + '" onclick="openUserPick({type:\'tab\',idx:' + i + '}, roleUserIds(tabs[' + i + '].role))" style="flex-shrink:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 10px;border-radius:6px;background:var(--accent-dim);color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;display:' + (isUser?'':'none') + '" title="클릭하여 인원 변경">' + (isUser ? esc(pickSummary(roleUserIds(t.role))) : '') + '</span>' +
     '<button class="btn-sm danger" onclick="deleteTab(' + i + ')" style="height:36px;padding:0 12px;font-size:12px;flex-shrink:0">삭제</button>' +
-    '</div>').join('');
+    '</div>';
+  }).join('');
 
   wrap.innerHTML = '<div class="settings-wrap">' +
     '<div class="s-section"><h4>계정 관리 (Google Sheets "계정" 시트 연동)</h4>' +
     '<div style="overflow-x:auto"><table class="s-table"><thead><tr><th>아이디</th><th>이름</th><th>비밀번호</th><th style="width:100px">권한</th><th style="width:120px"></th></tr></thead><tbody>' + accRows + '</tbody></table></div>' +
     '<div class="s-add-row"><input id="newAccId" placeholder="아이디"><input id="newAccName" placeholder="이름"><input id="newAccPw" placeholder="비밀번호"><select id="newAccRole"><option value="팀원">팀원</option><option value="팀장">팀장</option></select><button class="btn-sm accent" onclick="addNewAcc()" style="flex-shrink:0">추가</button></div></div>' +
     '<div class="s-section"><h4>탭별 사이트 주소 관리 (Google Sheets "탭설정" 시트 연동)</h4>' + tabUrlRows +
-    '<div class="s-add-row" style="margin-top:16px"><input id="newTabName" placeholder="새 탭 이름"><input id="newTabUrl" placeholder="Google Sheets URL (선택)"><select id="newTabRole" style="width:100px;flex-shrink:0"><option value="all">전체공개</option><option value="팀장">팀장만</option></select><button class="btn-sm accent" onclick="addNewTab()" style="flex-shrink:0">탭 추가</button></div>' +
+    '<div class="s-add-row" style="margin-top:16px"><input id="newTabName" placeholder="새 탭 이름"><input id="newTabUrl" placeholder="Google Sheets URL (선택)"><select id="newTabRole" onchange="onNewTabRoleSel(this.value)" style="width:100px;flex-shrink:0"><option value="all">전체공개</option><option value="팀장">팀장만</option><option value="user">특정인</option></select><span id="newTabUsel" onclick="openUserPick({type:\'newtab\'}, newTabUserIds)" style="flex-shrink:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 10px;border-radius:6px;background:var(--accent-dim);color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;display:none" title="클릭하여 인원 변경"></span><button class="btn-sm accent" onclick="addNewTab()" style="flex-shrink:0">탭 추가</button></div>' +
     '<div class="actions" style="margin-top:20px"><button class="btn-sm accent" onclick="saveAllTabs()">전체 저장</button></div></div></div>';
 }
 
@@ -560,7 +659,16 @@ async function addNewAcc() {
 async function saveAllTabs() {
   for (let i = 0; i < tabs.length; i++) {
     tabs[i].url = document.getElementById('tab_url_' + i).value.trim();
-    tabs[i].role = document.getElementById('tab_role_' + i).value;
+    const sel = document.getElementById('tab_role_' + i).value;
+    if (sel === 'user') {
+      // 특정인 선택 시 role은 인원 선택 확인 때 이미 'user:...'로 저장됨
+      if (!String(tabs[i].role || '').startsWith('user:')) {
+        toast('"' + tabs[i].name + '" 탭의 열람 인원을 선택하세요', 'err');
+        return;
+      }
+    } else {
+      tabs[i].role = sel;
+    }
   }
   try {
     await api('saveTabs', { tabs });
@@ -581,8 +689,13 @@ async function deleteTab(i) {
 async function addNewTab() {
   const name = document.getElementById('newTabName').value.trim();
   const url = document.getElementById('newTabUrl').value.trim();
-  const role = document.getElementById('newTabRole').value;
+  let role = document.getElementById('newTabRole').value;
   if (!name) { toast('탭 이름을 입력하세요', 'err'); return; }
+  if (role === 'user') {
+    if (!newTabUserIds.length) { toast('열람 가능 인원을 선택하세요', 'err'); return; }
+    role = 'user:' + newTabUserIds.join(',');
+  }
+  newTabUserIds = [];
   tabs.push({ name, url, role });
   try {
     await api('saveTabs', { tabs });
@@ -623,7 +736,13 @@ function editCurrentUrl() {
   document.getElementById('modalTitle').textContent = '탭 수정';
   document.getElementById('mName').value = tab.name;
   document.getElementById('mUrl').value = tab.url;
-  document.getElementById('mRole').value = tab.role || 'all';
+  const r = tab.role || 'all';
+  modalUserIds = roleUserIds(r);
+  document.getElementById('mRole').value = r.startsWith('user:') ? 'user' : r;
+  const lbl = document.getElementById('mUserSel');
+  if (modalUserIds.length) {
+    getAccountList().then(() => { lbl.textContent = pickSummary(modalUserIds) + ' — 클릭하여 변경'; lbl.style.display = ''; });
+  } else lbl.style.display = 'none';
   document.getElementById('modalBg').classList.add('show');
 }
 
@@ -631,6 +750,7 @@ function openAddModal() {
   editingIdx = -1;
   document.getElementById('modalTitle').textContent = '새 문서 탭 추가';
   document.getElementById('mName').value = '';document.getElementById('mUrl').value = '';document.getElementById('mRole').value = 'all';
+  modalUserIds = []; document.getElementById('mUserSel').style.display = 'none';
   document.getElementById('modalBg').classList.add('show');
   setTimeout(() => document.getElementById('mName').focus(), 100);
 }
@@ -640,8 +760,12 @@ function closeModal() { document.getElementById('modalBg').classList.remove('sho
 async function saveModal() {
   const name = document.getElementById('mName').value.trim();
   const url = document.getElementById('mUrl').value.trim();
-  const role = document.getElementById('mRole').value;
+  let role = document.getElementById('mRole').value;
   if (!name) { document.getElementById('mName').focus(); return; }
+  if (role === 'user') {
+    if (!modalUserIds.length) { toast('열람 가능 인원을 선택하세요', 'err'); return; }
+    role = 'user:' + modalUserIds.join(',');
+  }
   if (editingIdx >= 0) {
     tabs[editingIdx] = { name, url, role };
   } else {
