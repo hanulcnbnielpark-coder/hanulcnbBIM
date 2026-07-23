@@ -363,12 +363,11 @@ function roleUserIds(role) {
   return r.startsWith('user:') ? r.slice(5).split(',').map(s => s.trim()).filter(Boolean) : [];
 }
 function canViewTab(t) {
-  if (currentUser.role === '팀장') return true;
   const r = t.role || 'all';
-  if (r === 'all') return true;
-  if (r === '팀장') return false;
+  // 특정인 탭: 팀장이라도 목록에 없으면 숨김 (설정 화면에서는 전체 탭 관리 가능)
   if (r.startsWith('user:')) return roleUserIds(r).includes(String(currentUser.id));
-  return false;
+  if (currentUser.role === '팀장') return true;
+  return r === 'all';
 }
 function getVisibleTabs() { return tabs.filter(canViewTab); }
 
@@ -400,7 +399,7 @@ async function openUserPick(target, selectedIds) {
   const sel = (selectedIds || []).map(String);
   document.getElementById('upList').innerHTML = accs.length ? accs.map(a =>
     '<label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;font-weight:500">' +
-    '<input type="checkbox" class="up-chk" value="' + escAttr(String(a.id)) + '"' + (sel.includes(String(a.id)) ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--accent)">' +
+    '<input type="checkbox" class="up-chk" value="' + escAttr(String(a.id)) + '"' + (sel.includes(String(a.id)) ? ' checked' : '') + ' style="width:16px;height:16px;margin:0;padding:0;flex-shrink:0;accent-color:var(--accent)">' +
     esc(a.name) + ' <span style="color:var(--text-3);font-size:12px">(' + esc(String(a.id)) + ')</span></label>').join('')
     : '<div style="color:var(--text-3);font-size:14px">등록된 계정이 없습니다</div>';
   document.getElementById('upBg').classList.add('show');
@@ -410,6 +409,7 @@ function closeUserPick() { document.getElementById('upBg').classList.remove('sho
 function confirmUserPick() {
   const ids = [...document.querySelectorAll('.up-chk:checked')].map(c => c.value);
   if (!ids.length) { toast('최소 1명을 선택하세요', 'err'); return; }
+  if (!ids.includes(String(currentUser.id))) toast('내 계정이 목록에 없어 이 탭은 내 화면에서 숨겨집니다', '');
   if (upTarget && upTarget.type === 'tab') {
     tabs[upTarget.idx].role = 'user:' + ids.join(',');
     const lbl = document.getElementById('tab_usel_' + upTarget.idx);
